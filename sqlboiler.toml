@@ -1,0 +1,7 @@
+[postgres]
+dbname = "pilots_development"
+user = "devuser"
+pass = "devword"
+host = "localhost"
+port = 32768
+sslmode = "disable"
