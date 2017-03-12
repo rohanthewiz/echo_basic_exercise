@@ -1,6 +1,9 @@
+-- noinspection SqlNoDataSourceInspectionForFile
+
 CREATE TABLE pilots (
   id serial primary key NOT NULL,
   name text NOT NULL,
+  hobbies text[] NOT NULL,
   created_at TIMESTAMP not NULL,
   updated_at TIMESTAMP NOT NULL
 );

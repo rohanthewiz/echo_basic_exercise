@@ -14,14 +14,16 @@ import (
 	"github.com/vattle/sqlboiler/queries"
 	"github.com/vattle/sqlboiler/queries/qm"
 	"github.com/vattle/sqlboiler/strmangle"
+	"github.com/vattle/sqlboiler/types"
 )
 
 // Pilot is an object representing the database table.
 type Pilot struct {
-	ID        int       `boil:"id" json:"id" toml:"id" yaml:"id"`
-	Name      string    `boil:"name" json:"name" toml:"name" yaml:"name"`
-	CreatedAt time.Time `boil:"created_at" json:"created_at" toml:"created_at" yaml:"created_at"`
-	UpdatedAt time.Time `boil:"updated_at" json:"updated_at" toml:"updated_at" yaml:"updated_at"`
+	ID        int               `boil:"id" json:"id" toml:"id" yaml:"id"`
+	Name      string            `boil:"name" json:"name" toml:"name" yaml:"name"`
+	Hobbies   types.StringArray `boil:"hobbies" json:"hobbies" toml:"hobbies" yaml:"hobbies"`
+	CreatedAt time.Time         `boil:"created_at" json:"created_at" toml:"created_at" yaml:"created_at"`
+	UpdatedAt time.Time         `boil:"updated_at" json:"updated_at" toml:"updated_at" yaml:"updated_at"`
 
 	R *pilotR `boil:"-" json:"-" toml:"-" yaml:"-"`
 	L pilotL  `boil:"-" json:"-" toml:"-" yaml:"-"`
@@ -29,16 +31,16 @@ type Pilot struct {
 
 // pilotR is where relationships are stored.
 type pilotR struct {
-	Languages LanguageSlice
 	Jets      JetSlice
+	Languages LanguageSlice
 }
 
 // pilotL is where Load methods for each relationship are stored.
 type pilotL struct{}
 
 var (
-	pilotColumns               = []string{"id", "name", "created_at", "updated_at"}
-	pilotColumnsWithoutDefault = []string{"name", "created_at", "updated_at"}
+	pilotColumns               = []string{"id", "name", "hobbies", "created_at", "updated_at"}
+	pilotColumnsWithoutDefault = []string{"name", "hobbies", "created_at", "updated_at"}
 	pilotColumnsWithDefault    = []string{"id"}
 	pilotPrimaryKeyColumns     = []string{"id"}
 )
@@ -319,6 +321,30 @@ func (q pilotQuery) Exists() (bool, error) {
 	return count > 0, nil
 }
 
+// JetsG retrieves all the jet's jets.
+func (o *Pilot) JetsG(mods ...qm.QueryMod) jetQuery {
+	return o.Jets(boil.GetDB(), mods...)
+}
+
+// Jets retrieves all the jet's jets with an executor.
+func (o *Pilot) Jets(exec boil.Executor, mods ...qm.QueryMod) jetQuery {
+	queryMods := []qm.QueryMod{
+		qm.Select("\"a\".*"),
+	}
+
+	if len(mods) != 0 {
+		queryMods = append(queryMods, mods...)
+	}
+
+	queryMods = append(queryMods,
+		qm.Where("\"a\".\"pilot_id\"=?", o.ID),
+	)
+
+	query := Jets(exec, queryMods...)
+	queries.SetFrom(query.Query, "\"jets\" as \"a\"")
+	return query
+}
+
 // LanguagesG retrieves all the language's languages.
 func (o *Pilot) LanguagesG(mods ...qm.QueryMod) languageQuery {
 	return o.Languages(boil.GetDB(), mods...)
@@ -344,28 +370,76 @@ func (o *Pilot) Languages(exec boil.Executor, mods ...qm.QueryMod) languageQuery
 	return query
 }
 
-// JetsG retrieves all the jet's jets.
-func (o *Pilot) JetsG(mods ...qm.QueryMod) jetQuery {
-	return o.Jets(boil.GetDB(), mods...)
-}
+// LoadJets allows an eager lookup of values, cached into the
+// loaded structs of the objects.
+func (pilotL) LoadJets(e boil.Executor, singular bool, maybePilot interface{}) error {
+	var slice []*Pilot
+	var object *Pilot
 
-// Jets retrieves all the jet's jets with an executor.
-func (o *Pilot) Jets(exec boil.Executor, mods ...qm.QueryMod) jetQuery {
-	queryMods := []qm.QueryMod{
-		qm.Select("\"a\".*"),
+	count := 1
+	if singular {
+		object = maybePilot.(*Pilot)
+	} else {
+		slice = *maybePilot.(*PilotSlice)
+		count = len(slice)
 	}
 
-	if len(mods) != 0 {
-		queryMods = append(queryMods, mods...)
+	args := make([]interface{}, count)
+	if singular {
+		if object.R == nil {
+			object.R = &pilotR{}
+		}
+		args[0] = object.ID
+	} else {
+		for i, obj := range slice {
+			if obj.R == nil {
+				obj.R = &pilotR{}
+			}
+			args[i] = obj.ID
+		}
 	}
 
-	queryMods = append(queryMods,
-		qm.Where("\"a\".\"pilot_id\"=?", o.ID),
+	query := fmt.Sprintf(
+		"select * from \"jets\" where \"pilot_id\" in (%s)",
+		strmangle.Placeholders(dialect.IndexPlaceholders, count, 1, 1),
 	)
+	if boil.DebugMode {
+		fmt.Fprintf(boil.DebugWriter, "%s\n%v\n", query, args)
+	}
 
-	query := Jets(exec, queryMods...)
-	queries.SetFrom(query.Query, "\"jets\" as \"a\"")
-	return query
+	results, err := e.Query(query, args...)
+	if err != nil {
+		return errors.Wrap(err, "failed to eager load jets")
+	}
+	defer results.Close()
+
+	var resultSlice []*Jet
+	if err = queries.Bind(results, &resultSlice); err != nil {
+		return errors.Wrap(err, "failed to bind eager loaded slice jets")
+	}
+
+	if len(jetAfterSelectHooks) != 0 {
+		for _, obj := range resultSlice {
+			if err := obj.doAfterSelectHooks(e); err != nil {
+				return err
+			}
+		}
+	}
+	if singular {
+		object.R.Jets = resultSlice
+		return nil
+	}
+
+	for _, foreign := range resultSlice {
+		for _, local := range slice {
+			if local.ID == foreign.PilotID {
+				local.R.Jets = append(local.R.Jets, foreign)
+				break
+			}
+		}
+	}
+
+	return nil
 }
 
 // LoadLanguages allows an eager lookup of values, cached into the
@@ -456,75 +530,87 @@ func (pilotL) LoadLanguages(e boil.Executor, singular bool, maybePilot interface
 	return nil
 }
 
-// LoadJets allows an eager lookup of values, cached into the
-// loaded structs of the objects.
-func (pilotL) LoadJets(e boil.Executor, singular bool, maybePilot interface{}) error {
-	var slice []*Pilot
-	var object *Pilot
+// AddJetsG adds the given related objects to the existing relationships
+// of the pilot, optionally inserting them as new records.
+// Appends related to o.R.Jets.
+// Sets related.R.Pilot appropriately.
+// Uses the global database handle.
+func (o *Pilot) AddJetsG(insert bool, related ...*Jet) error {
+	return o.AddJets(boil.GetDB(), insert, related...)
+}
 
-	count := 1
-	if singular {
-		object = maybePilot.(*Pilot)
+// AddJetsP adds the given related objects to the existing relationships
+// of the pilot, optionally inserting them as new records.
+// Appends related to o.R.Jets.
+// Sets related.R.Pilot appropriately.
+// Panics on error.
+func (o *Pilot) AddJetsP(exec boil.Executor, insert bool, related ...*Jet) {
+	if err := o.AddJets(exec, insert, related...); err != nil {
+		panic(boil.WrapErr(err))
+	}
+}
+
+// AddJetsGP adds the given related objects to the existing relationships
+// of the pilot, optionally inserting them as new records.
+// Appends related to o.R.Jets.
+// Sets related.R.Pilot appropriately.
+// Uses the global database handle and panics on error.
+func (o *Pilot) AddJetsGP(insert bool, related ...*Jet) {
+	if err := o.AddJets(boil.GetDB(), insert, related...); err != nil {
+		panic(boil.WrapErr(err))
+	}
+}
+
+// AddJets adds the given related objects to the existing relationships
+// of the pilot, optionally inserting them as new records.
+// Appends related to o.R.Jets.
+// Sets related.R.Pilot appropriately.
+func (o *Pilot) AddJets(exec boil.Executor, insert bool, related ...*Jet) error {
+	var err error
+	for _, rel := range related {
+		if insert {
+			rel.PilotID = o.ID
+			if err = rel.Insert(exec); err != nil {
+				return errors.Wrap(err, "failed to insert into foreign table")
+			}
+		} else {
+			updateQuery := fmt.Sprintf(
+				"UPDATE \"jets\" SET %s WHERE %s",
+				strmangle.SetParamNames("\"", "\"", 1, []string{"pilot_id"}),
+				strmangle.WhereClause("\"", "\"", 2, jetPrimaryKeyColumns),
+			)
+			values := []interface{}{o.ID, rel.ID}
+
+			if boil.DebugMode {
+				fmt.Fprintln(boil.DebugWriter, updateQuery)
+				fmt.Fprintln(boil.DebugWriter, values)
+			}
+
+			if _, err = exec.Exec(updateQuery, values...); err != nil {
+				return errors.Wrap(err, "failed to update foreign table")
+			}
+
+			rel.PilotID = o.ID
+		}
+	}
+
+	if o.R == nil {
+		o.R = &pilotR{
+			Jets: related,
+		}
 	} else {
-		slice = *maybePilot.(*PilotSlice)
-		count = len(slice)
+		o.R.Jets = append(o.R.Jets, related...)
 	}
 
-	args := make([]interface{}, count)
-	if singular {
-		if object.R == nil {
-			object.R = &pilotR{}
-		}
-		args[0] = object.ID
-	} else {
-		for i, obj := range slice {
-			if obj.R == nil {
-				obj.R = &pilotR{}
+	for _, rel := range related {
+		if rel.R == nil {
+			rel.R = &jetR{
+				Pilot: o,
 			}
-			args[i] = obj.ID
+		} else {
+			rel.R.Pilot = o
 		}
 	}
-
-	query := fmt.Sprintf(
-		"select * from \"jets\" where \"pilot_id\" in (%s)",
-		strmangle.Placeholders(dialect.IndexPlaceholders, count, 1, 1),
-	)
-	if boil.DebugMode {
-		fmt.Fprintf(boil.DebugWriter, "%s\n%v\n", query, args)
-	}
-
-	results, err := e.Query(query, args...)
-	if err != nil {
-		return errors.Wrap(err, "failed to eager load jets")
-	}
-	defer results.Close()
-
-	var resultSlice []*Jet
-	if err = queries.Bind(results, &resultSlice); err != nil {
-		return errors.Wrap(err, "failed to bind eager loaded slice jets")
-	}
-
-	if len(jetAfterSelectHooks) != 0 {
-		for _, obj := range resultSlice {
-			if err := obj.doAfterSelectHooks(e); err != nil {
-				return err
-			}
-		}
-	}
-	if singular {
-		object.R.Jets = resultSlice
-		return nil
-	}
-
-	for _, foreign := range resultSlice {
-		for _, local := range slice {
-			if local.ID == foreign.PilotID {
-				local.R.Jets = append(local.R.Jets, foreign)
-				break
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -757,90 +843,6 @@ func removeLanguagesFromPilotsSlice(o *Pilot, related []*Language) {
 			break
 		}
 	}
-}
-
-// AddJetsG adds the given related objects to the existing relationships
-// of the pilot, optionally inserting them as new records.
-// Appends related to o.R.Jets.
-// Sets related.R.Pilot appropriately.
-// Uses the global database handle.
-func (o *Pilot) AddJetsG(insert bool, related ...*Jet) error {
-	return o.AddJets(boil.GetDB(), insert, related...)
-}
-
-// AddJetsP adds the given related objects to the existing relationships
-// of the pilot, optionally inserting them as new records.
-// Appends related to o.R.Jets.
-// Sets related.R.Pilot appropriately.
-// Panics on error.
-func (o *Pilot) AddJetsP(exec boil.Executor, insert bool, related ...*Jet) {
-	if err := o.AddJets(exec, insert, related...); err != nil {
-		panic(boil.WrapErr(err))
-	}
-}
-
-// AddJetsGP adds the given related objects to the existing relationships
-// of the pilot, optionally inserting them as new records.
-// Appends related to o.R.Jets.
-// Sets related.R.Pilot appropriately.
-// Uses the global database handle and panics on error.
-func (o *Pilot) AddJetsGP(insert bool, related ...*Jet) {
-	if err := o.AddJets(boil.GetDB(), insert, related...); err != nil {
-		panic(boil.WrapErr(err))
-	}
-}
-
-// AddJets adds the given related objects to the existing relationships
-// of the pilot, optionally inserting them as new records.
-// Appends related to o.R.Jets.
-// Sets related.R.Pilot appropriately.
-func (o *Pilot) AddJets(exec boil.Executor, insert bool, related ...*Jet) error {
-	var err error
-	for _, rel := range related {
-		if insert {
-			rel.PilotID = o.ID
-			if err = rel.Insert(exec); err != nil {
-				return errors.Wrap(err, "failed to insert into foreign table")
-			}
-		} else {
-			updateQuery := fmt.Sprintf(
-				"UPDATE \"jets\" SET %s WHERE %s",
-				strmangle.SetParamNames("\"", "\"", 1, []string{"pilot_id"}),
-				strmangle.WhereClause("\"", "\"", 2, jetPrimaryKeyColumns),
-			)
-			values := []interface{}{o.ID, rel.ID}
-
-			if boil.DebugMode {
-				fmt.Fprintln(boil.DebugWriter, updateQuery)
-				fmt.Fprintln(boil.DebugWriter, values)
-			}
-
-			if _, err = exec.Exec(updateQuery, values...); err != nil {
-				return errors.Wrap(err, "failed to update foreign table")
-			}
-
-			rel.PilotID = o.ID
-		}
-	}
-
-	if o.R == nil {
-		o.R = &pilotR{
-			Jets: related,
-		}
-	} else {
-		o.R.Jets = append(o.R.Jets, related...)
-	}
-
-	for _, rel := range related {
-		if rel.R == nil {
-			rel.R = &jetR{
-				Pilot: o,
-			}
-		} else {
-			rel.R.Pilot = o
-		}
-	}
-	return nil
 }
 
 // PilotsG retrieves all records.

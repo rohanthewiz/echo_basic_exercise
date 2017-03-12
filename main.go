@@ -49,6 +49,7 @@ func main() {
 
 		p := &models.Pilot{
 			Name: "John",
+			Hobbies: []string{ "flying", "reading"},
 		}
 		err = p.Insert(db)
 		if err != nil {
@@ -59,6 +60,7 @@ func main() {
 
 		p2 := &models.Pilot{
 			Name: "George",
+			Hobbies: []string{ "singing", "dancing" },
 		}
 		err = p2.Insert(db)
 		if err != nil {

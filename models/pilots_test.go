@@ -459,6 +459,78 @@ func testPilotsInsertWhitelist(t *testing.T) {
 	}
 }
 
+func testPilotToManyJets(t *testing.T) {
+	var err error
+	tx := MustTx(boil.Begin())
+	defer tx.Rollback()
+
+	var a Pilot
+	var b, c Jet
+
+	seed := randomize.NewSeed()
+	if err = randomize.Struct(seed, &a, pilotDBTypes, true, pilotColumnsWithDefault...); err != nil {
+		t.Errorf("Unable to randomize Pilot struct: %s", err)
+	}
+
+	if err := a.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+
+	randomize.Struct(seed, &b, jetDBTypes, false, jetColumnsWithDefault...)
+	randomize.Struct(seed, &c, jetDBTypes, false, jetColumnsWithDefault...)
+
+	b.PilotID = a.ID
+	c.PilotID = a.ID
+	if err = b.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Insert(tx); err != nil {
+		t.Fatal(err)
+	}
+
+	jet, err := a.Jets(tx).All()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bFound, cFound := false, false
+	for _, v := range jet {
+		if v.PilotID == b.PilotID {
+			bFound = true
+		}
+		if v.PilotID == c.PilotID {
+			cFound = true
+		}
+	}
+
+	if !bFound {
+		t.Error("expected to find b")
+	}
+	if !cFound {
+		t.Error("expected to find c")
+	}
+
+	slice := PilotSlice{&a}
+	if err = a.L.LoadJets(tx, false, &slice); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.R.Jets); got != 2 {
+		t.Error("number of eager loaded records wrong, got:", got)
+	}
+
+	a.R.Jets = nil
+	if err = a.L.LoadJets(tx, true, &a); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.R.Jets); got != 2 {
+		t.Error("number of eager loaded records wrong, got:", got)
+	}
+
+	if t.Failed() {
+		t.Logf("%#v", jet)
+	}
+}
+
 func testPilotToManyLanguages(t *testing.T) {
 	var err error
 	tx := MustTx(boil.Begin())
@@ -538,28 +610,29 @@ func testPilotToManyLanguages(t *testing.T) {
 	}
 }
 
-func testPilotToManyJets(t *testing.T) {
+func testPilotToManyAddOpJets(t *testing.T) {
 	var err error
+
 	tx := MustTx(boil.Begin())
 	defer tx.Rollback()
 
 	var a Pilot
-	var b, c Jet
+	var b, c, d, e Jet
 
 	seed := randomize.NewSeed()
-	if err = randomize.Struct(seed, &a, pilotDBTypes, true, pilotColumnsWithDefault...); err != nil {
-		t.Errorf("Unable to randomize Pilot struct: %s", err)
+	if err = randomize.Struct(seed, &a, pilotDBTypes, false, strmangle.SetComplement(pilotPrimaryKeyColumns, pilotColumnsWithoutDefault)...); err != nil {
+		t.Fatal(err)
+	}
+	foreigners := []*Jet{&b, &c, &d, &e}
+	for _, x := range foreigners {
+		if err = randomize.Struct(seed, x, jetDBTypes, false, strmangle.SetComplement(jetPrimaryKeyColumns, jetColumnsWithoutDefault)...); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := a.Insert(tx); err != nil {
 		t.Fatal(err)
 	}
-
-	randomize.Struct(seed, &b, jetDBTypes, false, jetColumnsWithDefault...)
-	randomize.Struct(seed, &c, jetDBTypes, false, jetColumnsWithDefault...)
-
-	b.PilotID = a.ID
-	c.PilotID = a.ID
 	if err = b.Insert(tx); err != nil {
 		t.Fatal(err)
 	}
@@ -567,49 +640,50 @@ func testPilotToManyJets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	jet, err := a.Jets(tx).All()
-	if err != nil {
-		t.Fatal(err)
+	foreignersSplitByInsertion := [][]*Jet{
+		{&b, &c},
+		{&d, &e},
 	}
 
-	bFound, cFound := false, false
-	for _, v := range jet {
-		if v.PilotID == b.PilotID {
-			bFound = true
+	for i, x := range foreignersSplitByInsertion {
+		err = a.AddJets(tx, i != 0, x...)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if v.PilotID == c.PilotID {
-			cFound = true
+
+		first := x[0]
+		second := x[1]
+
+		if a.ID != first.PilotID {
+			t.Error("foreign key was wrong value", a.ID, first.PilotID)
 		}
-	}
+		if a.ID != second.PilotID {
+			t.Error("foreign key was wrong value", a.ID, second.PilotID)
+		}
 
-	if !bFound {
-		t.Error("expected to find b")
-	}
-	if !cFound {
-		t.Error("expected to find c")
-	}
+		if first.R.Pilot != &a {
+			t.Error("relationship was not added properly to the foreign slice")
+		}
+		if second.R.Pilot != &a {
+			t.Error("relationship was not added properly to the foreign slice")
+		}
 
-	slice := PilotSlice{&a}
-	if err = a.L.LoadJets(tx, false, &slice); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(a.R.Jets); got != 2 {
-		t.Error("number of eager loaded records wrong, got:", got)
-	}
+		if a.R.Jets[i*2] != first {
+			t.Error("relationship struct slice not set to correct value")
+		}
+		if a.R.Jets[i*2+1] != second {
+			t.Error("relationship struct slice not set to correct value")
+		}
 
-	a.R.Jets = nil
-	if err = a.L.LoadJets(tx, true, &a); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(a.R.Jets); got != 2 {
-		t.Error("number of eager loaded records wrong, got:", got)
-	}
-
-	if t.Failed() {
-		t.Logf("%#v", jet)
+		count, err := a.Jets(tx).Count()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := int64((i + 1) * 2); count != want {
+			t.Error("want", want, "got", count)
+		}
 	}
 }
-
 func testPilotToManyAddOpLanguages(t *testing.T) {
 	var err error
 
@@ -831,81 +905,6 @@ func testPilotToManyRemoveOpLanguages(t *testing.T) {
 	}
 }
 
-func testPilotToManyAddOpJets(t *testing.T) {
-	var err error
-
-	tx := MustTx(boil.Begin())
-	defer tx.Rollback()
-
-	var a Pilot
-	var b, c, d, e Jet
-
-	seed := randomize.NewSeed()
-	if err = randomize.Struct(seed, &a, pilotDBTypes, false, strmangle.SetComplement(pilotPrimaryKeyColumns, pilotColumnsWithoutDefault)...); err != nil {
-		t.Fatal(err)
-	}
-	foreigners := []*Jet{&b, &c, &d, &e}
-	for _, x := range foreigners {
-		if err = randomize.Struct(seed, x, jetDBTypes, false, strmangle.SetComplement(jetPrimaryKeyColumns, jetColumnsWithoutDefault)...); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := a.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err = b.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err = c.Insert(tx); err != nil {
-		t.Fatal(err)
-	}
-
-	foreignersSplitByInsertion := [][]*Jet{
-		{&b, &c},
-		{&d, &e},
-	}
-
-	for i, x := range foreignersSplitByInsertion {
-		err = a.AddJets(tx, i != 0, x...)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		first := x[0]
-		second := x[1]
-
-		if a.ID != first.PilotID {
-			t.Error("foreign key was wrong value", a.ID, first.PilotID)
-		}
-		if a.ID != second.PilotID {
-			t.Error("foreign key was wrong value", a.ID, second.PilotID)
-		}
-
-		if first.R.Pilot != &a {
-			t.Error("relationship was not added properly to the foreign slice")
-		}
-		if second.R.Pilot != &a {
-			t.Error("relationship was not added properly to the foreign slice")
-		}
-
-		if a.R.Jets[i*2] != first {
-			t.Error("relationship struct slice not set to correct value")
-		}
-		if a.R.Jets[i*2+1] != second {
-			t.Error("relationship struct slice not set to correct value")
-		}
-
-		count, err := a.Jets(tx).Count()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := int64((i + 1) * 2); count != want {
-			t.Error("want", want, "got", count)
-		}
-	}
-}
-
 func testPilotsReload(t *testing.T) {
 	t.Parallel()
 
@@ -976,7 +975,7 @@ func testPilotsSelect(t *testing.T) {
 }
 
 var (
-	pilotDBTypes = map[string]string{`CreatedAt`: `timestamp without time zone`, `ID`: `integer`, `Name`: `text`, `UpdatedAt`: `timestamp without time zone`}
+	pilotDBTypes = map[string]string{`CreatedAt`: `timestamp without time zone`, `Hobbies`: `ARRAYtext`, `ID`: `integer`, `Name`: `text`, `UpdatedAt`: `timestamp without time zone`}
 	_            = bytes.MinRead
 )
 

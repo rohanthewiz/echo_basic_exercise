@@ -393,7 +393,7 @@ func (languageL) LoadPilots(e boil.Executor, singular bool, maybeLanguage interf
 		one := new(Pilot)
 		var localJoinCol int
 
-		err = results.Scan(&one.ID, &one.Name, &one.CreatedAt, &one.UpdatedAt, &localJoinCol)
+		err = results.Scan(&one.ID, &one.Name, &one.Hobbies, &one.CreatedAt, &one.UpdatedAt, &localJoinCol)
 		if err = results.Err(); err != nil {
 			return errors.Wrap(err, "failed to plebian-bind eager loaded slice pilots")
 		}
