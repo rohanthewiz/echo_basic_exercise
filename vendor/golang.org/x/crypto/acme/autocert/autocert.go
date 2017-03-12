@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -21,12 +20,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	mathrand "math/rand"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/acme"
@@ -37,7 +36,7 @@ import (
 var pseudoRand *lockedMathRand
 
 func init() {
-	src := mathrand.NewSource(timeNow().UnixNano())
+	src := mathrand.NewSource(time.Now().UnixNano())
 	pseudoRand = &lockedMathRand{rnd: mathrand.New(src)}
 }
 
@@ -129,7 +128,7 @@ type Manager struct {
 	// Client is used to perform low-level operations, such as account registration
 	// and requesting new certificates.
 	// If Client is nil, a zero-value acme.Client is used with acme.LetsEncryptURL
-	// directory endpoint and a newly-generated ECDSA P-256 key.
+	// directory endpoint and a newly-generated 2048-bit RSA key.
 	//
 	// Mutating the field after the first call of GetCertificate method will have no effect.
 	Client *acme.Client
@@ -140,12 +139,6 @@ type Manager struct {
 	//
 	// If the Client's account key is already registered, Email is not used.
 	Email string
-
-	// ForceRSA makes the Manager generate certificates with 2048-bit RSA keys.
-	//
-	// If false, a default is used. Currently the default
-	// is EC-based keys using the P-256 curve.
-	ForceRSA bool
 
 	clientMu sync.Mutex
 	client   *acme.Client // initialized by acmeClient method
@@ -193,7 +186,6 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 	}
 
 	// regular domain
-	name = strings.TrimSuffix(name, ".") // golang.org/issue/18114
 	cert, err := m.cert(name)
 	if err == nil {
 		return cert, nil
@@ -308,7 +300,12 @@ func (m *Manager) cachePut(domain string, tlscert *tls.Certificate) error {
 	// private
 	switch key := tlscert.PrivateKey.(type) {
 	case *ecdsa.PrivateKey:
-		if err := encodeECDSAKey(&buf, key); err != nil {
+		b, err := x509.MarshalECPrivateKey(key)
+		if err != nil {
+			return err
+		}
+		pb := &pem.Block{Type: "EC PRIVATE KEY", Bytes: b}
+		if err := pem.Encode(&buf, pb); err != nil {
 			return err
 		}
 	case *rsa.PrivateKey:
@@ -332,15 +329,6 @@ func (m *Manager) cachePut(domain string, tlscert *tls.Certificate) error {
 	// TODO: might want to define a cache timeout on m
 	ctx := context.Background()
 	return m.Cache.Put(ctx, domain, buf.Bytes())
-}
-
-func encodeECDSAKey(w io.Writer, key *ecdsa.PrivateKey) error {
-	b, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return err
-	}
-	pb := &pem.Block{Type: "EC PRIVATE KEY", Bytes: b}
-	return pem.Encode(w, pb)
 }
 
 // createCert starts the domain ownership verification and returns a certificate
@@ -391,21 +379,11 @@ func (m *Manager) certState(domain string) (*certState, error) {
 	if state, ok := m.state[domain]; ok {
 		return state, nil
 	}
-
 	// new locked state
-	var (
-		err error
-		key crypto.Signer
-	)
-	if m.ForceRSA {
-		key, err = rsa.GenerateKey(rand.Reader, 2048)
-	} else {
-		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
 	}
-
 	state := &certState{
 		key:    key,
 		locked: true,
@@ -553,55 +531,7 @@ func (m *Manager) renew(domain string, key crypto.Signer, exp time.Time) {
 	}
 	dr := &domainRenewal{m: m, domain: domain, key: key}
 	m.renewal[domain] = dr
-	dr.start(exp)
-}
-
-// stopRenew stops all currently running cert renewal timers.
-// The timers are not restarted during the lifetime of the Manager.
-func (m *Manager) stopRenew() {
-	m.renewalMu.Lock()
-	defer m.renewalMu.Unlock()
-	for name, dr := range m.renewal {
-		delete(m.renewal, name)
-		dr.stop()
-	}
-}
-
-func (m *Manager) accountKey(ctx context.Context) (crypto.Signer, error) {
-	const keyName = "acme_account.key"
-
-	genKey := func() (*ecdsa.PrivateKey, error) {
-		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	}
-
-	if m.Cache == nil {
-		return genKey()
-	}
-
-	data, err := m.Cache.Get(ctx, keyName)
-	if err == ErrCacheMiss {
-		key, err := genKey()
-		if err != nil {
-			return nil, err
-		}
-		var buf bytes.Buffer
-		if err := encodeECDSAKey(&buf, key); err != nil {
-			return nil, err
-		}
-		if err := m.Cache.Put(ctx, keyName, buf.Bytes()); err != nil {
-			return nil, err
-		}
-		return key, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	priv, _ := pem.Decode(data)
-	if priv == nil || !strings.Contains(priv.Type, "PRIVATE") {
-		return nil, errors.New("acme/autocert: invalid account key found in cache")
-	}
-	return parsePrivateKey(priv.Bytes)
+	time.AfterFunc(dr.next(exp), dr.renew)
 }
 
 func (m *Manager) acmeClient(ctx context.Context) (*acme.Client, error) {
@@ -617,7 +547,7 @@ func (m *Manager) acmeClient(ctx context.Context) (*acme.Client, error) {
 	}
 	if client.Key == nil {
 		var err error
-		client.Key, err = m.accountKey(ctx)
+		client.Key, err = rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return nil, err
 		}
@@ -789,5 +719,23 @@ func (r *lockedMathRand) int63n(max int64) int64 {
 	return n
 }
 
+func timeNow() time.Time {
+	return clock.Load().(func() time.Time)()
+}
+
 // for easier testing
-var timeNow = time.Now
+var (
+	// clock stores the time.Now func pointer or a fake
+	// thereof. It's an atomic.Value because tests weren't waiting
+	// for goroutines to shut down during completing causing races.
+	// TODO(crhym3,bradfitz): make tests more well-behaved, and
+	// then revert this back to just a func() time.Time type.
+	// This was the easier quick fix.
+	clock atomic.Value
+
+	testDidRenewLoop = func(next time.Duration, err error) {}
+)
+
+func init() {
+	clock.Store(time.Now)
+}

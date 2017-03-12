@@ -43,6 +43,8 @@ type State struct {
 	SingletonTestTemplates *templateList
 
 	TestMainTemplate *template.Template
+
+	Importer importer
 }
 
 // New creates a new state based off of the config
@@ -88,6 +90,8 @@ func New(config *Config) (*State, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to initialize struct tags")
 	}
+
+	s.Importer = newImporter()
 
 	return s, nil
 }
@@ -204,6 +208,62 @@ func (s *State) initTemplates() error {
 		}
 	}
 
+	return s.processReplacements()
+}
+
+// processReplacements loads any replacement templates
+func (s *State) processReplacements() error {
+	basePath, err := getBasePath(s.Config.BaseDir)
+	if err != nil {
+		return err
+	}
+
+	for _, replace := range s.Config.Replacements {
+		splits := strings.Split(replace, ":")
+		if len(splits) != 2 {
+			return errors.Errorf("replace parameters must have 2 arguments, given: %s", replace)
+		}
+
+		var toReplaceFname string
+		toReplace, replaceWith := splits[0], splits[1]
+
+		inf, err := os.Stat(filepath.Join(basePath, toReplace))
+		if err != nil {
+			return errors.Errorf("cannot stat %q", toReplace)
+		}
+		if inf.IsDir() {
+			return errors.Errorf("replace argument must be a path to a file not a dir: %q", toReplace)
+		}
+		toReplaceFname = inf.Name()
+
+		inf, err = os.Stat(replaceWith)
+		if err != nil {
+			return errors.Errorf("cannot stat %q", replaceWith)
+		}
+		if inf.IsDir() {
+			return errors.Errorf("replace argument must be a path to a file not a dir: %q", replaceWith)
+		}
+
+		switch filepath.Dir(toReplace) {
+		case templatesDirectory:
+			err = replaceTemplate(s.Templates.Template, toReplaceFname, replaceWith)
+		case templatesSingletonDirectory:
+			err = replaceTemplate(s.SingletonTemplates.Template, toReplaceFname, replaceWith)
+		case templatesTestDirectory:
+			err = replaceTemplate(s.TestTemplates.Template, toReplaceFname, replaceWith)
+		case templatesSingletonTestDirectory:
+			err = replaceTemplate(s.SingletonTestTemplates.Template, toReplaceFname, replaceWith)
+		case templatesTestMainDirectory:
+			err = replaceTemplate(s.TestMainTemplate, toReplaceFname, replaceWith)
+		default:
+			return errors.Errorf("replace file's directory not part of any known folder: %s", toReplace)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -297,6 +357,12 @@ func (s *State) initTags(tags []string) error {
 
 // initOutFolder creates the folder that will hold the generated output.
 func (s *State) initOutFolder() error {
+	if s.Config.Wipe {
+		if err := os.RemoveAll(s.Config.OutFolder); err != nil {
+			return err
+		}
+	}
+
 	return os.MkdirAll(s.Config.OutFolder, os.ModePerm)
 }
 

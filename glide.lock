@@ -1,23 +1,23 @@
 hash: 1ba6c4700fe7d1f76b8f2cb636daacf5923f0b3cf81258c27565e7cb4c7059c2
-updated: 2017-03-06T22:13:25.18895228-06:00
+updated: 2017-03-11T20:00:46.654305101-06:00
 imports:
 - name: github.com/go-sql-driver/mysql
-  version: 2e00b5cd70399450106cec6431c2e2ce3cae5034
+  version: 0b58b37b664c21f3010e836f1b931e1d0b0b0685
 - name: github.com/labstack/echo
   version: 948d607539e92f3974d8f24951c8975d7342e24a
 - name: github.com/labstack/gommon
-  version: e8995fb26e646187d33cff439b18609cfba23088
+  version: 9cedb429ffbe71a32a3ae7c65fd109cb7ae07804
   subpackages:
   - color
   - log
 - name: github.com/lib/pq
-  version: ca5bc43047f2138703da0f3d3ca89a59f3d597f1
+  version: 50761b0867bd1d9d069276790bcd4a3bccf2324a
   subpackages:
   - oid
 - name: github.com/mattn/go-colorable
   version: acb9493f2794fd0f820de7a27a217dafbb1b65ea
 - name: github.com/mattn/go-isatty
-  version: 9622e0cc9d8f9be434ca605520ff9a16808fee47
+  version: 57fdcb988a5c543893cc61bce354a6e24ab70022
 - name: github.com/nullbio/inflect
   version: 54c067623e28f2299d3b5ad9d2f614a878e25aca
 - name: github.com/pkg/errors
@@ -31,7 +31,7 @@ imports:
 - name: github.com/valyala/fasttemplate
   version: dcecefd839c4193db0d35b88ec65b4c12d360ab0
 - name: github.com/vattle/sqlboiler
-  version: bfba60eaad30f691f1e3b83882b370223fa5416b
+  version: e8723a2797b9608411b5b7649996836cf5514807
   subpackages:
   - bdb
   - bdb/drivers
@@ -42,17 +42,17 @@ imports:
   - strmangle
   - types
 - name: golang.org/x/crypto
-  version: 728b753d0135da6801d45a38e6f43ff55779c5c2
+  version: 9e590154d2353f3f5e1b24da7275686040dcf491
   subpackages:
   - acme
   - acme/autocert
 - name: golang.org/x/net
-  version: d379faa25cbdc04d653984913a2ceb43b0bc46d7
+  version: 1358eff22f0dd0c54fc521042cc607f6ff4b531a
   subpackages:
   - context
   - context/ctxhttp
 - name: golang.org/x/sys
-  version: e48874b42435b4347fc52bdee0424a52abc974d7
+  version: 99f16d856c9836c42d24e7ab64ea72916925fa97
   subpackages:
   - unix
 - name: gopkg.in/inconshreveable/log15.v2
@@ -83,7 +83,7 @@ testImports:
 - name: github.com/magiconair/properties
   version: b3b15ef068fd0b17ddf408a23669f20811d194d2
 - name: github.com/mitchellh/mapstructure
-  version: db1efb556f84b25a0a13a04aad883943538ad2e0
+  version: 53818660ed4955e899c0bcafa97299a388bd7c8e
 - name: github.com/pelletier/go-buffruneio
   version: c37440a7cf42ac63b919c752ca73a85067e05992
 - name: github.com/pelletier/go-toml

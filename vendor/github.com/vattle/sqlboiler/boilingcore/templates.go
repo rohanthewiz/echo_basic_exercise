@@ -2,11 +2,13 @@ package boilingcore
 
 import (
 	"fmt"
+	"io/ioutil"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
 
+	"github.com/pkg/errors"
 	"github.com/vattle/sqlboiler/bdb"
 	"github.com/vattle/sqlboiler/queries"
 	"github.com/vattle/sqlboiler/strmangle"
@@ -109,7 +111,7 @@ func loadTemplates(dir string) (*templateList, error) {
 	return &templateList{Template: tpl}, err
 }
 
-// loadTemplate loads a single template file.
+// loadTemplate loads a single template file
 func loadTemplate(dir string, filename string) (*template.Template, error) {
 	pattern := filepath.Join(dir, filename)
 	tpl, err := template.New("").Funcs(templateFunctions).ParseFiles(pattern)
@@ -119,6 +121,25 @@ func loadTemplate(dir string, filename string) (*template.Template, error) {
 	}
 
 	return tpl.Lookup(filename), err
+}
+
+// replaceTemplate finds the template matching with name and replaces its
+// contents with the contents of the template located at filename
+func replaceTemplate(tpl *template.Template, name, filename string) error {
+	if tpl == nil {
+		return fmt.Errorf("template for %s is nil", name)
+	}
+
+	b, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return errors.Wrapf(err, "failed reading template file: %s", filename)
+	}
+
+	if tpl, err = tpl.New(name).Funcs(templateFunctions).Parse(string(b)); err != nil {
+		return errors.Wrapf(err, "failed to parse template file: %s", filename)
+	}
+
+	return nil
 }
 
 // set is to stop duplication from named enums, allowing a template loop
@@ -147,7 +168,8 @@ func (o once) Put(s string) bool {
 // stringMap function.
 var templateStringMappers = map[string]func(string) string{
 	// String ops
-	"quoteWrap": func(a string) string { return fmt.Sprintf(`"%s"`, a) },
+	"quoteWrap":       func(a string) string { return fmt.Sprintf(`"%s"`, a) },
+	"replaceReserved": strmangle.ReplaceReservedWords,
 
 	// Casing
 	"titleCase": strmangle.TitleCase,

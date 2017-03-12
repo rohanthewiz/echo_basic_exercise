@@ -22,11 +22,10 @@ import (
 
 func TestRenewalNext(t *testing.T) {
 	now := time.Now()
-	timeNow = func() time.Time { return now }
-	defer func() { timeNow = time.Now }()
+	clock.Store(func() time.Time { return now })
+	defer clock.Store(time.Now)
 
 	man := &Manager{RenewBefore: 7 * 24 * time.Hour}
-	defer man.stopRenew()
 	tt := []struct {
 		expiry   time.Time
 		min, max time.Duration
@@ -111,14 +110,13 @@ func TestRenewFromCache(t *testing.T) {
 	}
 	man := &Manager{
 		Prompt:      AcceptTOS,
-		Cache:       newMemCache(),
+		Cache:       make(memCache),
 		RenewBefore: 24 * time.Hour,
 		Client: &acme.Client{
 			Key:          key,
 			DirectoryURL: ca.URL,
 		},
 	}
-	defer man.stopRenew()
 
 	// cache an almost expired cert
 	now := time.Now()

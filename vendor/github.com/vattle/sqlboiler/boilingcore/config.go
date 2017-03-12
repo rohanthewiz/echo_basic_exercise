@@ -10,10 +10,12 @@ type Config struct {
 	WhitelistTables  []string
 	BlacklistTables  []string
 	Tags             []string
+	Replacements     []string
 	Debug            bool
 	NoTests          bool
 	NoHooks          bool
 	NoAutoTimestamps bool
+	Wipe             bool
 
 	Postgres PostgresConfig
 	MySQL    MySQLConfig
